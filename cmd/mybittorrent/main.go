@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha1"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -146,8 +147,57 @@ func main() {
 			log.Panicln("Length not found")
 		}
 
+		infoBencoded := bencodeDict(info.(map[string]interface{}))
+		// calculate the SHA-1 hash
+		hash := sha1.Sum([]byte(infoBencoded))
+		// convert the hash to a string
+		hashString := fmt.Sprintf("%x", hash)
+		fmt.Println("Info Hash:", hashString)
+
 	} else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
 	}
+}
+
+func bencodeDict(dict interface{}) string {
+	result := "d"
+	for key, value := range dict.(map[string]interface{}) {
+		switch value.(type) {
+		case string:
+			result += strconv.Itoa(len(key)) + ":" + key + bencodeString(value.(string))
+		case int:
+			result += strconv.Itoa(len(key)) + ":" + key + bencodeInt(value.(int))
+		case []interface{}:
+			result += strconv.Itoa(len(key)) + ":" + key + bencodeList(value.([]interface{}))
+		case map[string]interface{}:
+			result += strconv.Itoa(len(key)) + ":" + key + bencodeDict(value)
+		}
+	}
+	result += "e"
+	return result
+}
+
+func bencodeString(str string) string {
+	return strconv.Itoa(len(str)) + ":" + str
+}
+func bencodeInt(i int) string {
+	return "i" + strconv.Itoa(i) + "e"
+}
+func bencodeList(list []interface{}) string {
+	result := "l"
+	for _, item := range list {
+		switch item.(type) {
+		case string:
+			result += bencodeString(item.(string))
+		case int:
+			result += bencodeInt(item.(int))
+		case []interface{}:
+			result += bencodeList(item.([]interface{}))
+		case map[string]interface{}:
+			result += bencodeDict(item)
+		}
+	}
+	result += "e"
+	return result
 }
