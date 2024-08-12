@@ -2,10 +2,14 @@ package main
 
 import (
 	"crypto/sha1"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -107,33 +111,19 @@ func main() {
 			os.Exit(1)
 		}
 		torrentFile := os.Args[2]
-		// read the torrent file
-		file, err := os.Open(torrentFile)
-		if err != nil {
-			log.Fatal(err)
-		}
-		// close the file later
-		defer func() {
-			if err := file.Close(); err != nil {
-				log.Fatal(err)
-			}
-		}()
-
-		// read the entire file into a byte slice
-		fileBytes, err := io.ReadAll(file)
-		decoded, _, err := decodeBencode(fileBytes)
+		decoded, err := getTorrentDict(torrentFile)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
 
 		// check if info key exists
-		info, ok := decoded.(map[string]interface{})["info"]
+		info, ok := decoded["info"]
 		if !ok {
 			fmt.Println("Info key not found")
 			return
 		}
-		announce, ok := decoded.(map[string]interface{})["announce"]
+		announce, ok := decoded["announce"]
 		if !ok {
 			fmt.Println("Announce key not found")
 			return
@@ -148,11 +138,7 @@ func main() {
 			log.Panicln("Length not found")
 		}
 
-		infoBencoded := bencodeDict(info.(map[string]interface{}))
-		// calculate the SHA-1 hash
-		hash := sha1.Sum([]byte(infoBencoded))
-		// convert the hash to a string
-		hashString := fmt.Sprintf("%x", hash)
+		hashString := getInfoHash(info.(map[string]interface{}))
 		fmt.Println("Info Hash:", hashString)
 
 		// get the piece length
@@ -176,10 +162,143 @@ func main() {
 		for i := 0; i < numPieces; i++ {
 			fmt.Printf("%x\n", piecesString[i*20:i*20+20])
 		}
+
+	} else if command == "peers" {
+		if len(os.Args) < 3 {
+			fmt.Println("Missing argument: peers <torrent file>")
+			os.Exit(1)
+		}
+		torrentFile := os.Args[2]
+		decoded, err := getTorrentDict(torrentFile)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		tracker := decoded["announce"].(string)
+		info := decoded["info"]
+		infoHash := getInfoHash(info.(map[string]interface{}))
+
+		// get length of the file
+		length, ok := info.(map[string]interface{})["length"]
+		if !ok {
+			log.Panicln("Length not found")
+		}
+		peerId := "-MACBOOK-PRO-" + "123456789012"
+		// trim to 20 characters
+		peerId = peerId[:20]
+		port := 6881
+		uploaded := 0
+		downloaded := 0
+		left := length.(int)
+		compact := 1
+
+		//+ "?info_hash=" + infoHash + "&peer_id=" + peerId + "&port=" + strconv.Itoa(port) + "&uploaded=" + strconv.Itoa(uploaded) + "&downloaded=" + strconv.Itoa(downloaded) + "&left=" + strconv.Itoa(left) + "&compact=" + strconv.Itoa(compact)
+
+		// make the url string using net/url
+		// make the request
+		requestString, err := url.ParseRequestURI(tracker)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		// add the query parameters
+		query := requestString.Query()
+		query.Add("peer_id", peerId)
+		query.Add("port", strconv.Itoa(port))
+		query.Add("uploaded", strconv.Itoa(uploaded))
+		query.Add("downloaded", strconv.Itoa(downloaded))
+		query.Add("left", strconv.Itoa(left))
+		query.Add("compact", strconv.Itoa(compact))
+		requestString.RawQuery = query.Encode()
+
+		// Convert the hex string to bytes
+		hashBytes, err := hex.DecodeString(infoHash)
+		if err != nil {
+			fmt.Println("Invalid infoHash:", err)
+			return
+		}
+
+		// Manually encode each byte of the hash to the desired URL format
+		var encodedHash string
+		for _, b := range hashBytes {
+			encodedHash += fmt.Sprintf("%%%02x", b)
+		}
+
+		encodedQuery := requestString.String()
+		finalQuery := encodedQuery + "&info_hash=" + encodedHash
+
+		// make the request
+		response, err := http.Get(finalQuery)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		// read the response
+		responseBytes, err := io.ReadAll(response.Body)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		// decode the response
+		decodedResponse, _, err := decodeBencode(responseBytes)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		// peers are stored in the response as a list of dictionaries
+		peers := []byte(decodedResponse.(map[string]interface{})["peers"].(string))
+		//Each peer is represented using 6 bytes. The first 4 bytes are the peer's IP address and the last 2 bytes are the peer's port number
+		numPeers := len(peers) / 6
+		for i := range numPeers {
+			// print the IP address
+			ip := fmt.Sprintf("%s.%s.%s.%s",
+				strconv.Itoa(int(peers[i*6])),
+				strconv.Itoa(int(peers[i*6+1])),
+				strconv.Itoa(int(peers[i*6+2])),
+				strconv.Itoa(int(peers[i*6+3])),
+			)
+			//big-endian order parse
+			port := binary.BigEndian.Uint16(peers[i*6+4 : i*6+4+2])
+			fmt.Printf("%s:%d\n", ip, port)
+		}
+
 	} else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
 	}
+}
+
+func getTorrentDict(torrentFile string) (map[string]interface{}, error) {
+	// read the torrent file
+	file, err := os.Open(torrentFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	// close the file later
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	// read the entire file into a byte slice
+	fileBytes, err := io.ReadAll(file)
+	decoded, _, err := decodeBencode(fileBytes)
+	if err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
+	return decoded.(map[string]interface{}), nil
+}
+
+func getInfoHash(info map[string]interface{}) string {
+	infoBencoded := bencodeDict(info)
+	// calculate the SHA-1 hash
+	hash := sha1.Sum([]byte(infoBencoded))
+	// convert the hash to a string
+	hashString := fmt.Sprintf("%x", hash)
+	return hashString
 }
 
 func bencodeDict(dict interface{}) string {
@@ -187,10 +306,12 @@ func bencodeDict(dict interface{}) string {
 	// get the keys in sorted order
 	keys := make([]string, len(dict.(map[string]interface{})))
 	i := 0
+
 	for key := range dict.(map[string]interface{}) {
 		keys[i] = key
 		i++
 	}
+
 	sort.Strings(keys)
 	for k := range keys {
 		key := keys[k]
