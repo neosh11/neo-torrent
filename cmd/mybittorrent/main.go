@@ -2,11 +2,8 @@ package main
 
 import (
 	"encoding/json"
-	"log"
-
-	// Uncomment this line to pass the first stage
-	// "encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"unicode"
@@ -59,6 +56,28 @@ func decodeBencode(bencodedString string) (value interface{}, EOL int, err error
 			}
 			list = append(list, val)
 			index += itemEOL
+		}
+	} else if rune(bencodedString[0]) == 'd' {
+		log.Printf("Dict", bencodedString)
+		index := 1
+		var dict = make(map[string]interface{})
+		for {
+			if rune(bencodedString[index]) == 'e' {
+				return dict, index + 1, nil
+			}
+			key, itemEOL, err := decodeBencode(bencodedString[index:])
+			if err != nil {
+				fmt.Errorf("Error decoding dict: %v", err)
+				return "", 0, err
+			}
+			index += itemEOL
+			val, keyEOL, err := decodeBencode(bencodedString[index:])
+			if err != nil {
+				fmt.Errorf("Error decoding dict: %v", err)
+				return "", 0, err
+			}
+			index += keyEOL
+			dict[key.(string)] = val
 		}
 	}
 	return "", 0, fmt.Errorf("Unsupported")
