@@ -154,6 +154,27 @@ func main() {
 		hashString := fmt.Sprintf("%x", hash)
 		fmt.Println("Info Hash:", hashString)
 
+		// get the piece length
+		pieceLength, ok := info.(map[string]interface{})["piece length"]
+		if !ok {
+			log.Panicln("Piece Length not found")
+
+		}
+		fmt.Println("Piece Length:", pieceLength)
+		// get the piece hashes
+		pieces, ok := info.(map[string]interface{})["pieces"]
+		if !ok {
+			log.Panicln("Pieces not found")
+		}
+		// convert the pieces to a string
+		piecesString := pieces.(string)
+		// calculate the number of pieces
+		numPieces := len(piecesString) / 20
+		// print the hashes
+		fmt.Println("Pieces Hashes:")
+		for i := 0; i < numPieces; i++ {
+			fmt.Printf("%x\n", piecesString[i*20:i*20+20])
+		}
 	} else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
