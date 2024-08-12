@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"sort"
 	"strconv"
 	"unicode"
 	// bencode "github.com/jackpal/bencode-go" // Available if you need it!
@@ -183,7 +184,17 @@ func main() {
 
 func bencodeDict(dict interface{}) string {
 	result := "d"
-	for key, value := range dict.(map[string]interface{}) {
+	// get the keys in sorted order
+	keys := make([]string, len(dict.(map[string]interface{})))
+	i := 0
+	for key := range dict.(map[string]interface{}) {
+		keys[i] = key
+		i++
+	}
+	sort.Strings(keys)
+	for k := range keys {
+		key := keys[k]
+		value := dict.(map[string]interface{})[keys[k]]
 		switch value.(type) {
 		case string:
 			result += strconv.Itoa(len(key)) + ":" + key + bencodeString(value.(string))
