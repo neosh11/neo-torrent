@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -262,6 +263,62 @@ func main() {
 			port := binary.BigEndian.Uint16(peers[i*6+4 : i*6+4+2])
 			fmt.Printf("%s:%d\n", ip, port)
 		}
+	} else if command == "handshake" {
+		// sample.torrent <peer_ip>:<peer_port>
+		if len(os.Args) < 4 {
+			fmt.Println("Missing argument: handshake <torrent file> <peer>")
+			os.Exit(1)
+		}
+		torrentFile := os.Args[2]
+		peer := os.Args[3]
+
+		decoded, err := getTorrentDict(torrentFile)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		info := decoded["info"]
+		infoHash := getInfoHash(info.(map[string]interface{}))
+		peerId := "-MACBOOK-PRO-" + "123456789012"
+
+		// create the handshake message
+		protocol := make([]byte, 1+19+8+20+20)
+		protocol[0] = 19
+		copy(protocol[1:], "BitTorrent protocol")
+		// copy the reserved bytes
+		copy(protocol[20:], make([]byte, 8))
+		// copy the info hash
+		infoHashBytes, err := hex.DecodeString(infoHash)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		copy(protocol[28:], infoHashBytes)
+		// copy the peer id
+		copy(protocol[48:], []byte(peerId))
+
+		// create the connection
+		conn, err := net.Dial("tcp", peer)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		// send the handshake message
+		_, err = conn.Write(protocol)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		// read the response
+		response := make([]byte, 100)
+		_, err = conn.Read(response)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		responsePeerId := response[48:68]
+		responsePeerIdHex := hex.EncodeToString(responsePeerId)
+		fmt.Println("Peer ID:", responsePeerIdHex)
 
 	} else {
 		fmt.Println("Unknown command: " + command)
